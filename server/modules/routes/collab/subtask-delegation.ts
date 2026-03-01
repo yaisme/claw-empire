@@ -1,5 +1,6 @@
 import type { Lang } from "../../../types/lang.ts";
 import type { AgentRow } from "./direct-chat.ts";
+import { reconcileVideoRenderDelegationState } from "../../workflow/orchestration/video-render-delegation-state.ts";
 import { createSubtaskDelegationBatch } from "./subtask-delegation-batch.ts";
 import { createSubtaskDelegationPromptBuilder } from "./subtask-delegation-prompt.ts";
 import { initializeSubtaskSummary, type SubtaskRow } from "./subtask-summary.ts";
@@ -189,60 +190,6 @@ export function initializeSubtaskDelegation(deps: SubtaskDelegationDeps) {
     autoResumeRetryTimers.set(taskId, timer);
   }
 
-  function reconcileVideoRenderDelegationState(taskId: string, pendingRender: SubtaskRow[]): {
-    staleResetCount: number;
-    recoveredDoneCount: number;
-  } {
-    const delegatedIds = [...new Set(
-      pendingRender
-        .map((sub) => String(sub.delegated_task_id ?? "").trim())
-        .filter((id) => id.length > 0),
-    )];
-    const delegatedStatusById = new Map<string, string>();
-    if (delegatedIds.length > 0) {
-      const placeholders = delegatedIds.map(() => "?").join(", ");
-      const delegatedRows = db
-        .prepare(`SELECT id, status FROM tasks WHERE id IN (${placeholders})`)
-        .all(...delegatedIds) as Array<{ id: string; status: string }>;
-      for (const row of delegatedRows) {
-        delegatedStatusById.set(row.id, String(row.status ?? ""));
-      }
-    }
-
-    let staleResetCount = 0;
-    let recoveredDoneCount = 0;
-    const doneAt = nowMs();
-    for (const sub of pendingRender) {
-      const delegatedTaskId = String(sub.delegated_task_id ?? "").trim();
-      if (!delegatedTaskId) continue;
-      const delegatedStatus = delegatedStatusById.get(delegatedTaskId);
-      if (!delegatedStatus || delegatedStatus === "cancelled" || delegatedStatus === "inbox") {
-        db.prepare(
-          `
-          UPDATE subtasks
-          SET delegated_task_id = NULL,
-              status = CASE WHEN status = 'blocked' THEN 'pending' ELSE status END,
-              blocked_reason = CASE WHEN status = 'blocked' THEN NULL ELSE blocked_reason END
-          WHERE id = ?
-        `,
-        ).run(sub.id);
-        broadcast("subtask_update", db.prepare("SELECT * FROM subtasks WHERE id = ?").get(sub.id));
-        staleResetCount += 1;
-        continue;
-      }
-      if (delegatedStatus === "review" || delegatedStatus === "done") {
-        db.prepare("UPDATE subtasks SET status = 'done', completed_at = ?, blocked_reason = NULL WHERE id = ?").run(
-          doneAt,
-          sub.id,
-        );
-        broadcast("subtask_update", db.prepare("SELECT * FROM subtasks WHERE id = ?").get(sub.id));
-        recoveredDoneCount += 1;
-      }
-    }
-
-    return { staleResetCount, recoveredDoneCount };
-  }
-
   function hasOpenForeignSubtasks(taskId: string, targetDeptIds: string[] = []): boolean {
     const uniqueDeptIds = [...new Set(targetDeptIds.filter(Boolean))];
     if (uniqueDeptIds.length > 0) {
@@ -367,21 +314,23 @@ export function initializeSubtaskDelegation(deps: SubtaskDelegationDeps) {
     );
     const runQueue = (index: number) => {
       if (index >= queues.length) {
-        subtaskDelegationDispatchInFlight.delete(taskId);
         const pending = pendingDelegationOptionsByTask.get(taskId);
         if (pending) {
-          pendingDelegationOptionsByTask.delete(taskId);
           appendTaskLog(
             taskId,
             "system",
             `Subtask delegation draining deferred request (includeRender=${pending.includeRender === true})`,
           );
           setTimeout(() => {
-            processSubtaskDelegations(taskId, pending);
+            const nextPending = pendingDelegationOptionsByTask.get(taskId) ?? pending;
+            pendingDelegationOptionsByTask.delete(taskId);
+            subtaskDelegationDispatchInFlight.delete(taskId);
+            processSubtaskDelegations(taskId, nextPending);
             maybeNotifyAllSubtasksComplete(parentTask.id);
           }, 150);
           return;
         }
+        subtaskDelegationDispatchInFlight.delete(taskId);
         maybeNotifyAllSubtasksComplete(parentTask.id);
         return;
       }
@@ -409,7 +358,7 @@ export function initializeSubtaskDelegation(deps: SubtaskDelegationDeps) {
       const nonRenderRemaining = remaining.cnt - pendingRender.length;
 
       if (nonRenderRemaining === 0 && pendingRender.length > 0) {
-        const repair = reconcileVideoRenderDelegationState(parentTaskId, pendingRender);
+        const repair = reconcileVideoRenderDelegationState({ db, nowMs, broadcast }, pendingRender);
         if (repair.staleResetCount > 0 || repair.recoveredDoneCount > 0) {
           appendTaskLog(
             parentTaskId,

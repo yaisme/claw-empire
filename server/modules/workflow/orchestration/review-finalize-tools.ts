@@ -4,6 +4,7 @@ import {
   resolveVideoArtifactRelativeCandidates,
   resolveVideoArtifactSpecForTask,
 } from "../packs/video-artifact.ts";
+import { reconcileVideoRenderDelegationState } from "./video-render-delegation-state.ts";
 
 type CreateReviewFinalizeToolsDeps = Record<string, any>;
 
@@ -42,60 +43,6 @@ export function createReviewFinalizeTools(deps: CreateReviewFinalizeToolsDeps) {
     startReviewConsensusMeeting,
     processSubtaskDelegations,
   } = deps;
-
-  function reconcileVideoRenderDelegationState(taskId: string, pendingRender: Array<{ id: string; status: string; delegated_task_id: string | null }>): {
-    staleResetCount: number;
-    recoveredDoneCount: number;
-  } {
-    const delegatedIds = [...new Set(
-      pendingRender
-        .map((sub) => String(sub.delegated_task_id ?? "").trim())
-        .filter((id) => id.length > 0),
-    )];
-    const delegatedStatusById = new Map<string, string>();
-    if (delegatedIds.length > 0) {
-      const placeholders = delegatedIds.map(() => "?").join(", ");
-      const delegatedRows = db
-        .prepare(`SELECT id, status FROM tasks WHERE id IN (${placeholders})`)
-        .all(...delegatedIds) as Array<{ id: string; status: string }>;
-      for (const row of delegatedRows) {
-        delegatedStatusById.set(row.id, String(row.status ?? ""));
-      }
-    }
-
-    let staleResetCount = 0;
-    let recoveredDoneCount = 0;
-    const doneAt = nowMs();
-    for (const sub of pendingRender) {
-      const delegatedTaskId = String(sub.delegated_task_id ?? "").trim();
-      if (!delegatedTaskId) continue;
-      const delegatedStatus = delegatedStatusById.get(delegatedTaskId);
-      if (!delegatedStatus || delegatedStatus === "cancelled" || delegatedStatus === "inbox") {
-        db.prepare(
-          `
-          UPDATE subtasks
-          SET delegated_task_id = NULL,
-              status = CASE WHEN status = 'blocked' THEN 'pending' ELSE status END,
-              blocked_reason = CASE WHEN status = 'blocked' THEN NULL ELSE blocked_reason END
-          WHERE id = ?
-        `,
-        ).run(sub.id);
-        broadcast("subtask_update", db.prepare("SELECT * FROM subtasks WHERE id = ?").get(sub.id));
-        staleResetCount += 1;
-        continue;
-      }
-      if (delegatedStatus === "review" || delegatedStatus === "done") {
-        db.prepare("UPDATE subtasks SET status = 'done', completed_at = ?, blocked_reason = NULL WHERE id = ?").run(
-          doneAt,
-          sub.id,
-        );
-        broadcast("subtask_update", db.prepare("SELECT * FROM subtasks WHERE id = ?").get(sub.id));
-        recoveredDoneCount += 1;
-      }
-    }
-
-    return { staleResetCount, recoveredDoneCount };
-  }
 
   function reconcileDelegatedSubtasksAfterRun(taskId: string, exitCode: number): void {
     const linked = db
@@ -279,7 +226,7 @@ export function createReviewFinalizeTools(deps: CreateReviewFinalizeToolsDeps) {
       let nonRenderRemaining = remainingSubtaskCount - pendingRender.length;
 
       if (nonRenderRemaining === 0 && pendingRender.length > 0) {
-        const repair = reconcileVideoRenderDelegationState(taskId, pendingRender);
+        const repair = reconcileVideoRenderDelegationState({ db, nowMs, broadcast }, pendingRender);
         if (repair.staleResetCount > 0 || repair.recoveredDoneCount > 0) {
           appendTaskLog(
             taskId,
