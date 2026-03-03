@@ -70,6 +70,9 @@ Claw-Empire transforms your AI coding assistants — connected via **CLI**, **OA
 
 ## Latest Release (v2.0.1)
 
+- **Hydration-aware office-pack department precedence** - Non-development packs now prefer pack-profile department labels/icons before hydration, then switch to DB metadata after hydration completes.
+- **First-install bootstrap safety** - Fresh installs keep pack-profile defaults visible on first load, so initial users are not blocked by unhydrated DB state.
+- **Regression tests for merge semantics** - Added/updated tests for pre-hydration pack priority, post-hydration DB priority, and foreign-pack seed filtering.
 - **Discord token-based channel auto-discovery** - Added Discord Bot token channel lookup API and normalized token handling (`Bot <token>` or raw token) for immediate session setup.
 - **Auto channel loading in Settings** - Discord token input in chat editor now auto-loads guild/channel options and can auto-fill target ID/name.
 - **Discord inbound receiver added** - Introduced polling-based Discord receiver that forwards inbound user messages into `/api/inbox` (with bot-message filtering and cursor persistence).
