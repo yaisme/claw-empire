@@ -70,11 +70,26 @@ export function normalizePathEnv(raw: string | undefined): string {
 export const OPENCLAW_CONFIG_PATH = normalizePathEnv(process.env.OPENCLAW_CONFIG);
 export const API_AUTH_TOKEN = normalizeSecret(process.env.API_AUTH_TOKEN);
 export const INBOX_WEBHOOK_SECRET = normalizeSecret(process.env.INBOX_WEBHOOK_SECRET);
+
+// Warn at startup if API_AUTH_TOKEN is set but too short
+if (API_AUTH_TOKEN && API_AUTH_TOKEN.length < 16) {
+  console.warn(
+    "[SECURITY] API_AUTH_TOKEN is shorter than 16 characters. Use a strong secret (32+ chars recommended).",
+  );
+}
+
+// Warn at startup if INBOX_WEBHOOK_SECRET is not configured
+if (!INBOX_WEBHOOK_SECRET && process.env.NODE_ENV !== "test") {
+  console.warn(
+    "[SECURITY] INBOX_WEBHOOK_SECRET is not configured. The /api/inbox webhook endpoint will reject all requests.",
+  );
+}
 export const SESSION_AUTH_TOKEN = API_AUTH_TOKEN || randomBytes(32).toString("hex");
 export const ALLOWED_ORIGIN_SUFFIXES = (process.env.ALLOWED_ORIGIN_SUFFIXES ?? ".ts.net")
   .split(",")
   .map((v) => v.trim())
-  .filter(Boolean);
+  .filter(Boolean)
+  .map((v) => (v.startsWith(".") ? v : `.${v}`));
 export const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "")
   .split(",")
   .map((v) => v.trim())

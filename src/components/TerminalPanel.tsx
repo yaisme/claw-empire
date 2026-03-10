@@ -95,7 +95,7 @@ export default function TerminalPanel({
         }
       }
     } catch {
-      // ignore
+      // Polling endpoint — network errors are transient, retry on next interval
     }
   }, [taskId]);
 

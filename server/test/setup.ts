@@ -3,6 +3,11 @@ import path from "node:path";
 
 process.env.NODE_ENV = "test";
 
+// Provide a test encryption secret so OAuth/messenger crypto tests can run
+if (!process.env.OAUTH_ENCRYPTION_SECRET) {
+  process.env.OAUTH_ENCRYPTION_SECRET = "vitest-oauth-encryption-secret-key";
+}
+
 // Force isolated SQLite/log paths for server-side Vitest runs.
 const workerSuffix = process.env.VITEST_WORKER_ID || String(process.pid);
 const runtimeDir = path.resolve(process.cwd(), ".tmp", "vitest-runtime");

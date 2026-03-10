@@ -44,6 +44,21 @@ jobs:
                 .map((name) => path.join(workflowDir, name))
             : [];
 
+          // Also scan key source directories for hidden Unicode
+          for (const dir of ["src", "server"]) {
+            const dirPath = path.join(process.cwd(), dir);
+            if (!fs.existsSync(dirPath)) continue;
+            const walk = (d) => {
+              for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+                if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+                const full = path.join(d, entry.name);
+                if (entry.isDirectory()) { walk(full); }
+                else if (/\.(ts|tsx|js|mjs)$/.test(entry.name)) { candidates.push(full); }
+              }
+            };
+            walk(dirPath);
+          }
+
           const forbiddenRanges = [
             [0x202a, 0x202e], // bidi embedding/override
             [0x2066, 0x2069], // bidi isolates
@@ -91,6 +106,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies for known vulnerabilities
+        run: pnpm audit --prod || true
 
       - name: Run format check
         run: pnpm run format:check

@@ -1,6 +1,6 @@
 import cors from "cors";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 
 import {
@@ -10,7 +10,7 @@ import {
   SESSION_COOKIE_NAME,
 } from "../config/runtime.ts";
 
-const CSRF_TOKEN = createHash("sha256").update(`csrf:${SESSION_AUTH_TOKEN}`, "utf8").digest("hex");
+const CSRF_TOKEN = createHmac("sha256", SESSION_AUTH_TOKEN).update("csrf", "utf8").digest("hex");
 const TASK_INTERRUPT_TOKEN_SCOPE = "task_interrupt_v1";
 
 export function isLoopbackHostname(hostname: string): boolean {
@@ -88,8 +88,8 @@ export function hasValidCsrfToken(req: Request): boolean {
 }
 
 export function buildTaskInterruptControlToken(taskId: string, sessionId: string): string {
-  const input = `${TASK_INTERRUPT_TOKEN_SCOPE}:${SESSION_AUTH_TOKEN}:${taskId}:${sessionId}`;
-  return createHash("sha256").update(input, "utf8").digest("hex");
+  const input = `${TASK_INTERRUPT_TOKEN_SCOPE}:${taskId}:${sessionId}`;
+  return createHmac("sha256", SESSION_AUTH_TOKEN).update(input, "utf8").digest("hex");
 }
 
 export function hasValidTaskInterruptControlToken(taskId: string, sessionId: string, providedToken: string): boolean {
@@ -175,7 +175,47 @@ export function isIncomingMessageOriginTrusted(req: IncomingMessage): boolean {
   return isTrustedOrigin(origin);
 }
 
+// ---------------------------------------------------------------------------
+// Simple in-memory rate limiter (no external dependency)
+// ---------------------------------------------------------------------------
+interface RateLimitBucket {
+  count: number;
+  resetAt: number;
+}
+
+function createRateLimiter(windowMs: number, maxRequests: number) {
+  const buckets = new Map<string, RateLimitBucket>();
+
+  // Prune stale entries every 60s to prevent unbounded growth
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= now) buckets.delete(key);
+    }
+  }, 60_000).unref();
+
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const key = req.ip ?? req.socket?.remoteAddress ?? "unknown";
+    const now = Date.now();
+    let bucket = buckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      buckets.set(key, bucket);
+    }
+    bucket.count++;
+    if (bucket.count > maxRequests) {
+      res.status(429).json({ error: "too_many_requests" });
+      return;
+    }
+    next();
+  };
+}
+
 export function installSecurityMiddleware(app: Express): void {
+  // Rate limiters: general (200 req/min), sensitive endpoints (20 req/min)
+  const generalLimiter = createRateLimiter(60_000, 200);
+  const sensitiveLimiter = createRateLimiter(60_000, 20);
+
   const corsMiddleware = cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
@@ -198,6 +238,13 @@ export function installSecurityMiddleware(app: Express): void {
   });
 
   app.use(express.json({ limit: "12mb" }));
+
+  // Apply rate limiting to API routes
+  app.use("/api/", generalLimiter);
+  // Stricter limits on auth/webhook endpoints
+  app.use("/api/auth/", sensitiveLimiter);
+  app.use("/api/inbox", sensitiveLimiter);
+  app.use("/api/oauth/", sensitiveLimiter);
 
   app.get("/api/auth/session", (req, res) => {
     const bearer = bearerToken(req);

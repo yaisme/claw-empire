@@ -66,7 +66,9 @@ export function useWebSocket() {
           if (listeners) {
             for (const fn of listeners) fn(evt.payload);
           }
-        } catch {}
+        } catch {
+          // Malformed JSON from server — safe to ignore
+        }
       };
     }
 

@@ -7,6 +7,23 @@ import { OAUTH_BASE_HOST, PORT } from "../config/runtime.ts";
 // ---------------------------------------------------------------------------
 export const OAUTH_ENCRYPTION_SECRET = process.env.OAUTH_ENCRYPTION_SECRET || process.env.SESSION_SECRET || "";
 
+// Validate at import time — fail hard if the secret is missing or placeholder.
+// The empty-string fallback above is kept only so that the variable is always a string;
+// this guard ensures no request can succeed with an empty/placeholder key.
+if (
+  !OAUTH_ENCRYPTION_SECRET ||
+  OAUTH_ENCRYPTION_SECRET === "__CHANGE_ME__" ||
+  OAUTH_ENCRYPTION_SECRET.length < 16
+) {
+  if (process.env.NODE_ENV !== "test") {
+    console.error(
+      "[SECURITY] OAUTH_ENCRYPTION_SECRET is missing, placeholder, or too short (<16 chars). " +
+        "Set a strong secret in .env before starting the server.",
+    );
+    process.exit(1);
+  }
+}
+
 function oauthEncryptionKey(): Buffer {
   if (!OAUTH_ENCRYPTION_SECRET) {
     throw new Error("Missing OAUTH_ENCRYPTION_SECRET");
@@ -41,18 +58,11 @@ export function decryptSecret(payload: string): string {
 // ---------------------------------------------------------------------------
 export const OAUTH_BASE_URL = process.env.OAUTH_BASE_URL || `http://${OAUTH_BASE_HOST}:${PORT}`;
 
-// Built-in OAuth client credentials (same as OpenClaw/Claw-Kanban built-in values)
-// Environment variables still take precedence when provided.
-export const BUILTIN_GITHUB_CLIENT_ID = process.env.OAUTH_GITHUB_CLIENT_ID ?? "Iv1.b507a08c87ecfe98";
-export const BUILTIN_GOOGLE_CLIENT_ID =
-  process.env.OAUTH_GOOGLE_CLIENT_ID ??
-  Buffer.from(
-    "MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==",
-    "base64",
-  ).toString();
-export const BUILTIN_GOOGLE_CLIENT_SECRET =
-  process.env.OAUTH_GOOGLE_CLIENT_SECRET ??
-  Buffer.from("R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQWY=", "base64").toString();
+// OAuth client credentials — MUST be provided via environment variables.
+// No hardcoded fallbacks: credentials should never appear in source control.
+export const BUILTIN_GITHUB_CLIENT_ID = process.env.OAUTH_GITHUB_CLIENT_ID ?? "";
+export const BUILTIN_GOOGLE_CLIENT_ID = process.env.OAUTH_GOOGLE_CLIENT_ID ?? "";
+export const BUILTIN_GOOGLE_CLIENT_SECRET = process.env.OAUTH_GOOGLE_CLIENT_SECRET ?? "";
 
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 

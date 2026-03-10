@@ -299,7 +299,9 @@ export function registerTaskRunRoute(deps: TaskRunRouteDeps): void {
     const pendingInterruptPrompts = loadPendingInterruptPrompts(db as any, id, executionSession.sessionId);
     const interruptPromptBlock = buildInterruptPromptBlock(pendingInterruptPrompts);
 
-    const projectPath = resolveProjectPath(task) || (req.body?.project_path as string | undefined) || process.cwd();
+    let projectPath = resolveProjectPath(task) || (req.body?.project_path as string | undefined) || process.cwd();
+    // Sanitize: resolve to absolute, normalize to prevent traversal
+    projectPath = path.resolve(projectPath);
     const logPath = path.join(logsDir, `${id}.log`);
 
     const worktreePath = createWorktree(projectPath, id, agent.name);
