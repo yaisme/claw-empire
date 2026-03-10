@@ -2,7 +2,15 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import type { BaseRuntimeContext, RuntimeContext } from "./types/runtime-context.ts";
 
-import { DIST_DIR, IS_PRODUCTION } from "./config/runtime.ts";
+import {
+  DIST_DIR,
+  IS_PRODUCTION,
+  QDRANT_URL,
+  QDRANT_ENABLED,
+  EMBEDDING_BASE_URL,
+  EMBEDDING_API_KEY,
+  EMBEDDING_MODEL,
+} from "./config/runtime.ts";
 import {
   IN_PROGRESS_ORPHAN_GRACE_MS,
   IN_PROGRESS_ORPHAN_SWEEP_MS,
@@ -40,6 +48,8 @@ import { applyBaseSchema } from "./modules/bootstrap/schema/base-schema.ts";
 import { initializeOAuthRuntime } from "./modules/bootstrap/schema/oauth-runtime.ts";
 import { applyTaskSchemaMigrations } from "./modules/bootstrap/schema/task-schema-migrations.ts";
 import { applyDefaultSeeds } from "./modules/bootstrap/schema/seeds.ts";
+import { createVectorService, type VectorService } from "./modules/vector/vector-service.ts";
+import { registerVectorRoutes } from "./modules/vector/vector-routes.ts";
 
 export type { TaskCreationAuditInput } from "./modules/bootstrap/security-audit.ts";
 
@@ -74,6 +84,24 @@ const securityAudit = createSecurityAuditTools({
   nowMs,
   withSqliteBusyRetry: messageIdempotency.withSqliteBusyRetry,
 });
+
+// ---------------------------------------------------------------------------
+// Vector search service (Qdrant + embeddings)
+// ---------------------------------------------------------------------------
+const vectorService: VectorService = createVectorService({
+  qdrantUrl: QDRANT_URL,
+  embedding: {
+    baseUrl: EMBEDDING_BASE_URL,
+    apiKey: EMBEDDING_API_KEY,
+    model: EMBEDDING_MODEL,
+  },
+});
+
+if (QDRANT_ENABLED) {
+  vectorService.initialize().catch((err) => {
+    console.warn("[vector] Service unavailable:", err.message);
+  });
+}
 
 const runtimeContext: Record<string, any> & BaseRuntimeContext = {
   app,
@@ -117,12 +145,15 @@ const runtimeContext: Record<string, any> & BaseRuntimeContext = {
   express,
 
   DEPT_KEYWORDS: {},
+  vectorService,
 };
 
 const runtimeProxy = createDeferredRuntimeProxy(runtimeContext);
 
 Object.assign(runtimeContext, initializeWorkflow(runtimeProxy as RuntimeContext));
 Object.assign(runtimeContext, registerApiRoutes(runtimeContext as RuntimeContext));
+
+registerVectorRoutes({ app, db, vectorService });
 
 assertRuntimeFunctionsResolved(runtimeContext, ROUTE_RUNTIME_HELPER_KEYS, "route helper wiring");
 

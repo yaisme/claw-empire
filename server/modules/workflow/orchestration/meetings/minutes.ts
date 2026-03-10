@@ -1,5 +1,6 @@
 import type { Lang } from "../../../../types/lang.ts";
 import { randomUUID } from "node:crypto";
+import type { VectorService } from "../../../vector/vector-service.ts";
 
 interface AgentRow {
   id: string;
@@ -40,6 +41,7 @@ type MeetingMinutesDeps = {
   broadcast: (event: string, payload: unknown) => void;
   REVIEW_MAX_MEMO_ITEMS_PER_ROUND: number;
   REVIEW_MAX_MEMO_ITEMS_PER_DEPT: number;
+  vectorService?: VectorService;
 };
 
 export function createMeetingMinutesTools(deps: MeetingMinutesDeps) {
@@ -107,6 +109,25 @@ export function createMeetingMinutesTools(deps: MeetingMinutesDeps) {
 
   function finishMeetingMinutes(meetingId: string, status: "completed" | "revision_requested" | "failed"): void {
     db.prepare("UPDATE meeting_minutes SET status = ?, completed_at = ? WHERE id = ?").run(status, nowMs(), meetingId);
+
+    // Vector index completed meeting minutes
+    if (status === "completed" && deps.vectorService?.isAvailable()) {
+      const meeting = db.prepare("SELECT task_id FROM meeting_minutes WHERE id = ?").get(meetingId) as
+        | { task_id: string }
+        | undefined;
+      if (meeting) {
+        const entries = db
+          .prepare("SELECT speaker_name, content FROM meeting_minute_entries WHERE meeting_id = ? ORDER BY seq")
+          .all(meetingId) as Array<{ speaker_name: string; content: string }>;
+        deps.vectorService
+          .indexMeetingMinutes(
+            meetingId,
+            meeting.task_id,
+            entries.map((e) => ({ speaker: e.speaker_name, content: e.content })),
+          )
+          .catch((err: any) => console.warn("[vector] meeting index failed:", err.message));
+      }
+    }
   }
 
   function normalizeRevisionMemoNote(note: string): string {

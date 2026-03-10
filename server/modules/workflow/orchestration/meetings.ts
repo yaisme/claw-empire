@@ -85,6 +85,7 @@ export function initializeWorkflowMeetingTools(ctx: RuntimeContext): any {
     broadcast,
     REVIEW_MAX_MEMO_ITEMS_PER_ROUND,
     REVIEW_MAX_MEMO_ITEMS_PER_DEPT,
+    vectorService: (__ctx as any).vectorService,
   });
 
   const {

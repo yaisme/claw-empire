@@ -375,6 +375,7 @@ export function registerRoutesPartA(ctx: RuntimeContext): Record<string, never> 
     stopRequestedTasks,
     killPidTree,
     logsDir,
+    vectorService: (__ctx as any).vectorService,
   });
 
   // ---------------------------------------------------------------------------

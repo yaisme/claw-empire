@@ -9,6 +9,7 @@ import {
   consumeInterruptPrompts,
   loadPendingInterruptPrompts,
 } from "../core/interrupt-injection-tools.ts";
+import type { VectorService } from "../../vector/vector-service.ts";
 
 type CreateExecutionStartTaskToolsDeps = {
   nowMs: RuntimeContext["nowMs"];
@@ -39,6 +40,7 @@ type CreateExecutionStartTaskToolsDeps = {
   handleTaskRunComplete: RuntimeContext["handleTaskRunComplete"];
   notifyCeo: RuntimeContext["notifyCeo"];
   startProgressTimer: RuntimeContext["startProgressTimer"];
+  vectorService?: VectorService;
 };
 
 export function createExecutionStartTaskTools(deps: CreateExecutionStartTaskToolsDeps) {
@@ -184,6 +186,32 @@ export function createExecutionStartTaskTools(deps: CreateExecutionStartTaskTool
     const conversationCtx = getRecentConversationContext(execAgent.id);
     const continuationCtx = getTaskContinuationContext(taskId);
     const recentChanges = getRecentChanges(projPath, taskId);
+
+    // Pre-compute RAG context from vector search (async, will be available for continuation runs)
+    if (deps.vectorService?.isAvailable()) {
+      const query = `${taskData.title} ${taskData.description ?? ""}`.slice(0, 500);
+      Promise.all([
+        deps.vectorService.searchSimilarTasks(query, 3),
+        deps.vectorService.searchMeetingInsights(query, 3),
+      ])
+        .then(([similarTasks, meetingInsights]) => {
+          const ragParts: string[] = [];
+          if (similarTasks.length > 0) {
+            ragParts.push(
+              similarTasks.map((t) => `[past] ${t.title}: ${t.resultSnippet.slice(0, 200)}`).join("; "),
+            );
+          }
+          if (meetingInsights.length > 0) {
+            ragParts.push(
+              meetingInsights.map((m) => `[insight] ${m.speaker}: ${m.content.slice(0, 150)}`).join("; "),
+            );
+          }
+          if (ragParts.length > 0) {
+            appendTaskLog(taskId, "rag", `Similar context: ${ragParts.join(" | ").slice(0, 800)}`);
+          }
+        })
+        .catch(() => {});
+    }
     if (provider === "claude") {
       ensureClaudeMd(projPath, worktreePath);
     }

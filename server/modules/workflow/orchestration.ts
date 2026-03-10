@@ -471,6 +471,7 @@ export function initializeWorkflowPartC(ctx: RuntimeContext): WorkflowOrchestrat
     handleTaskRunComplete,
     notifyCeo,
     startProgressTimer,
+    vectorService: (__ctx as any).vectorService,
   });
 
   const workflowMeetingTools = initializeWorkflowMeetingTools(

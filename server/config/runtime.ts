@@ -96,6 +96,15 @@ export const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "")
   .filter(Boolean);
 
 // ---------------------------------------------------------------------------
+// Vector search (Qdrant + embeddings)
+// ---------------------------------------------------------------------------
+export const QDRANT_URL = (process.env.QDRANT_URL ?? "http://localhost:6333").replace(/\/+$/, "");
+export const QDRANT_ENABLED = (process.env.QDRANT_ENABLED ?? "true") !== "false";
+export const EMBEDDING_BASE_URL = (process.env.EMBEDDING_BASE_URL ?? "http://localhost:11434").replace(/\/+$/, "");
+export const EMBEDDING_API_KEY = process.env.EMBEDDING_API_KEY ?? "";
+export const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "nomic-embed-text";
+
+// ---------------------------------------------------------------------------
 // Production static file serving
 // ---------------------------------------------------------------------------
 export const DIST_DIR = path.resolve(SERVER_DIRNAME, "..", "..", "dist");

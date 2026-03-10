@@ -7,6 +7,7 @@ import type { RuntimeContext } from "../../../../types/runtime-context.ts";
 import type { MeetingMinuteEntryRow, MeetingMinutesRow } from "../../shared/types.ts";
 import { isWorkflowPackKey } from "../../../workflow/packs/definitions.ts";
 import { resolveWorkflowPackKeyForTask } from "../../../workflow/packs/task-pack-resolver.ts";
+import type { VectorService } from "../../../vector/vector-service.ts";
 
 export type TaskCrudRouteDeps = Pick<
   RuntimeContext,
@@ -26,7 +27,7 @@ export type TaskCrudRouteDeps = Pick<
   | "stopRequestedTasks"
   | "killPidTree"
   | "logsDir"
->;
+> & { vectorService?: VectorService };
 
 export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
   const {
@@ -508,6 +509,18 @@ export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
       clearTaskWorkflowState(id);
       if (nextStatus === "done" || nextStatus === "cancelled") {
         endTaskExecutionSession(id, `task_status_${nextStatus}`);
+      }
+    }
+
+    // Vector index on task completion
+    if (nextStatus === "done" && deps.vectorService?.isAvailable()) {
+      const taskForIndex = db.prepare("SELECT title, description, result FROM tasks WHERE id = ?").get(id) as
+        | { title: string; description: string | null; result: string | null }
+        | undefined;
+      if (taskForIndex) {
+        deps.vectorService
+          .indexTask(id, taskForIndex.title, taskForIndex.description, taskForIndex.result)
+          .catch((err: any) => console.warn("[vector] index failed:", err.message));
       }
     }
 
