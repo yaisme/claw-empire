@@ -1,0 +1,52 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.git/
+.gitignore
+
+# Runtime artifacts
+logs/
+custom-skills/
+tasks/
+*.log
+*.pid
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets*.json
+
+# Local worktrees
+.climpire-worktrees/
+.climpire/
+
+# IDE / Editor / AI
+.vscode/
+.idea/
+CLAUDE.md
+tasks.md
+.agents/
+.claude/
+
+# Coverage / test artifacts
+coverage/
+.nyc_output/
+test-results/
+.tmp/
+
+# Docs
+docs/reports/*
+
+# OS
+.DS_Store
+Thumbs.db

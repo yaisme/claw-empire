@@ -457,7 +457,7 @@ describe("registerTaskRunRoute", () => {
     handler(req, res);
 
     // createWorktree should have been called with an absolute path (not relative)
-    const calledPath = harness.spies.createWorktree.mock.calls[0]?.[0] as string;
+    const calledPath = (harness.spies.createWorktree.mock.calls as unknown[][])[0]?.[0] as string;
     expect(calledPath).toBeDefined();
     // path.resolve converts relative paths to absolute (starts with /)
     expect(calledPath.startsWith("/")).toBe(true);

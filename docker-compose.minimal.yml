@@ -1,0 +1,42 @@
+# =============================================================================
+# Claw-Empire — Minimal Docker Compose (no vector search)
+# =============================================================================
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose -f docker-compose.minimal.yml up -d
+#
+# =============================================================================
+
+services:
+  claw-empire:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claw-empire
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8790}:8790"
+    volumes:
+      - claw-data:/data
+      - claw-worktrees:/app/.climpire-worktrees
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8790
+      - DB_PATH=/data/db/claw-empire.sqlite
+      - LOGS_DIR=/data/logs
+      - QDRANT_ENABLED=false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8790/api/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  claw-data:
+    name: claw-empire-data
+  claw-worktrees:
+    name: claw-empire-worktrees
