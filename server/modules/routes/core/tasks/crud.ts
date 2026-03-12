@@ -82,6 +82,15 @@ export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
       return res.status(400).json({ error: "invalid_workflow_pack_key" });
     }
 
+    const rawLimit = firstQueryValue(req.query.limit);
+    const rawPage = firstQueryValue(req.query.page);
+    const parsedLimit = rawLimit ? Number(rawLimit) : null;
+    const parsedPage = rawPage ? Number(rawPage) : 1;
+    const usePagination = parsedLimit !== null && Number.isInteger(parsedLimit) && parsedLimit > 0;
+    const limit = usePagination ? Math.min(parsedLimit, 200) : null;
+    const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+    const offset = limit !== null ? (page - 1) * limit : 0;
+
     const conditions: string[] = [];
     const params: unknown[] = [];
 
@@ -107,6 +116,7 @@ export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const limitOffsetClause = limit !== null ? `LIMIT ? OFFSET ?` : "";
     const subtaskTotalExpr = `(
     (SELECT COUNT(*) FROM subtasks s WHERE s.task_id = t.id)
     +
@@ -137,6 +147,19 @@ export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
     )
   )`;
 
+    let total = 0;
+    if (limit !== null) {
+      const countRow = db
+        .prepare(`SELECT COUNT(*) AS cnt FROM tasks t ${where}`)
+        .get(...(params as SQLInputValue[])) as { cnt: number };
+      total = countRow.cnt;
+    }
+
+    const mainParams: SQLInputValue[] = [...(params as SQLInputValue[])];
+    if (limit !== null) {
+      mainParams.push(limit, offset);
+    }
+
     let tasks: unknown[];
     try {
       tasks = db
@@ -160,9 +183,10 @@ export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
       LEFT JOIN projects p ON t.project_id = p.id
       ${where}
       ORDER BY t.priority DESC, t.updated_at DESC
+      ${limitOffsetClause}
     `,
         )
-        .all(...(params as SQLInputValue[]));
+        .all(...mainParams);
     } catch {
       tasks = db
         .prepare(
@@ -182,12 +206,17 @@ export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
       LEFT JOIN projects p ON t.project_id = p.id
       ${where}
       ORDER BY t.priority DESC, t.updated_at DESC
+      ${limitOffsetClause}
     `,
         )
-        .all(...(params as SQLInputValue[]));
+        .all(...mainParams);
     }
 
-    res.json({ tasks });
+    if (limit !== null) {
+      res.json({ tasks, pagination: { page, limit, total } });
+    } else {
+      res.json({ tasks });
+    }
   });
 
   app.post("/api/tasks", (req, res) => {

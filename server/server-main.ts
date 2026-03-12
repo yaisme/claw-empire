@@ -50,6 +50,7 @@ import { applyTaskSchemaMigrations } from "./modules/bootstrap/schema/task-schem
 import { applyDefaultSeeds } from "./modules/bootstrap/schema/seeds.ts";
 import { createVectorService, type VectorService } from "./modules/vector/vector-service.ts";
 import { registerVectorRoutes } from "./modules/vector/vector-routes.ts";
+import { backupDatabase } from "./modules/backup.ts";
 
 export type { TaskCreationAuditInput } from "./modules/bootstrap/security-audit.ts";
 
@@ -67,6 +68,7 @@ applyBaseSchema(db);
 const oauthRuntime = initializeOAuthRuntime({ db, nowMs, runInTransaction });
 applyTaskSchemaMigrations(db);
 applyDefaultSeeds(db);
+backupDatabase(dbPath);
 
 const messageIdempotency = createMessageIdempotencyTools({
   db,
@@ -154,6 +156,26 @@ Object.assign(runtimeContext, initializeWorkflow(runtimeProxy as RuntimeContext)
 Object.assign(runtimeContext, registerApiRoutes(runtimeContext as RuntimeContext));
 
 registerVectorRoutes({ app, db, vectorService });
+
+app.post("/api/backup", (_req, res) => {
+  const result = backupDatabase(dbPath);
+  if (result) {
+    res.json({ ok: true, path: result });
+  } else {
+    res.status(500).json({ error: "backup_failed" });
+  }
+});
+
+// Global error handler — catches unhandled errors in route handlers
+app.use((err: any, _req: any, res: any, _next: any) => {
+  if (res.headersSent) return;
+  const status = typeof err.status === "number" ? err.status : 500;
+  const message = status === 500 ? "internal_server_error" : (err.message || "error");
+  if (status === 500) {
+    console.error("[server] Unhandled error:", err);
+  }
+  res.status(status).json({ error: message });
+});
 
 assertRuntimeFunctionsResolved(runtimeContext, ROUTE_RUNTIME_HELPER_KEYS, "route helper wiring");
 

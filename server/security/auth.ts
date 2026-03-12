@@ -212,6 +212,22 @@ function createRateLimiter(windowMs: number, maxRequests: number) {
 }
 
 export function installSecurityMiddleware(app: Express): void {
+  // Security headers — applied to all responses
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "0");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self' 'unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' ws: wss: data: blob: https://cloudflareinsights.com; worker-src 'self' blob:; frame-ancestors 'none'",
+    );
+    if (_req.secure || _req.header("x-forwarded-proto") === "https") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    next();
+  });
+
   // Rate limiters: general (200 req/min), sensitive endpoints (20 req/min)
   const generalLimiter = createRateLimiter(60_000, 200);
   const sensitiveLimiter = createRateLimiter(60_000, 20);

@@ -48,6 +48,17 @@ export function startLifecycle(ctx: RuntimeContext): void {
     stopRequestedTasks,
     wsClients,
     logsDir,
+    crossDeptNextCallbacks,
+    subtaskDelegationCallbacks,
+    subtaskDelegationDispatchInFlight,
+    delegatedTaskToSubtask,
+    subtaskDelegationCompletionNoticeSent,
+    taskExecutionSessions,
+    meetingPresenceUntil,
+    meetingSeatIndexByAgent,
+    meetingPhaseByAgent,
+    meetingTaskIdByAgent,
+    meetingReviewDecisionByAgent,
   } = ctx as any;
 
   // ---------------------------------------------------------------------------
@@ -361,6 +372,90 @@ export function startLifecycle(ctx: RuntimeContext): void {
   }
 
   // ---------------------------------------------------------------------------
+  // Periodic cleanup sweeper for in-memory orchestration Maps
+  // ---------------------------------------------------------------------------
+  const ORCHESTRATION_MAP_SWEEP_MS = 5 * 60 * 1000; // 5 minutes
+
+  function sweepStaleOrchestrationMaps(): void {
+    const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
+
+    // Collect all unique task IDs referenced across task-keyed Maps/Sets
+    const taskKeyedIds = new Set<string>();
+    for (const id of crossDeptNextCallbacks.keys()) taskKeyedIds.add(id);
+    for (const id of subtaskDelegationCallbacks.keys()) taskKeyedIds.add(id);
+    for (const id of subtaskDelegationDispatchInFlight) taskKeyedIds.add(id);
+    for (const id of delegatedTaskToSubtask.keys()) taskKeyedIds.add(id);
+    for (const id of taskExecutionSessions.keys()) taskKeyedIds.add(id);
+
+    if (taskKeyedIds.size > 0) {
+      // Batch-check task statuses from DB
+      const taskStatusMap = new Map<string, string>();
+      const stmt = db.prepare("SELECT id, status FROM tasks WHERE id = ?");
+      for (const taskId of taskKeyedIds) {
+        const row = stmt.get(taskId) as { id: string; status: string } | undefined;
+        if (row) {
+          taskStatusMap.set(taskId, row.status);
+        }
+        // If row is undefined, the task doesn't exist in DB — should be cleaned
+      }
+
+      let swept = 0;
+      for (const taskId of taskKeyedIds) {
+        const status = taskStatusMap.get(taskId);
+        if (!status || TERMINAL_STATUSES.has(status)) {
+          clearTaskWorkflowState(taskId);
+          swept++;
+        }
+      }
+
+      if (swept > 0) {
+        console.log(`[Claw-Empire] Orchestration map sweep: cleaned ${swept} stale task entries`);
+      }
+    }
+
+    // Sweep subtask-keyed Sets: subtaskDelegationCompletionNoticeSent is keyed by subtask ID
+    if (subtaskDelegationCompletionNoticeSent.size > 0) {
+      const staleSubtaskIds: string[] = [];
+      const subtaskStmt = db.prepare("SELECT id, status FROM subtasks WHERE id = ?");
+      for (const subtaskId of subtaskDelegationCompletionNoticeSent) {
+        const row = subtaskStmt.get(subtaskId) as { id: string; status: string } | undefined;
+        if (!row || row.status === "done") {
+          staleSubtaskIds.push(subtaskId);
+        }
+      }
+      for (const id of staleSubtaskIds) {
+        subtaskDelegationCompletionNoticeSent.delete(id);
+      }
+      if (staleSubtaskIds.length > 0) {
+        console.log(
+          `[Claw-Empire] Orchestration map sweep: cleaned ${staleSubtaskIds.length} stale subtask notice entries`,
+        );
+      }
+    }
+
+    // Sweep agent-keyed meeting Maps: remove entries where meetingPresenceUntil has expired
+    const now = nowMs();
+    const staleMeetingAgentIds: string[] = [];
+    for (const [agentId, expiresAt] of meetingPresenceUntil) {
+      if (expiresAt < now) {
+        staleMeetingAgentIds.push(agentId);
+      }
+    }
+    for (const agentId of staleMeetingAgentIds) {
+      meetingPresenceUntil.delete(agentId);
+      meetingSeatIndexByAgent.delete(agentId);
+      meetingPhaseByAgent.delete(agentId);
+      meetingTaskIdByAgent.delete(agentId);
+      meetingReviewDecisionByAgent.delete(agentId);
+    }
+    if (staleMeetingAgentIds.length > 0) {
+      console.log(
+        `[Claw-Empire] Orchestration map sweep: cleaned ${staleMeetingAgentIds.length} expired meeting presence entries`,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Auto-assign agent providers on startup
   // ---------------------------------------------------------------------------
   async function autoAssignAgentProviders(): Promise<void> {
@@ -413,6 +508,8 @@ export function startLifecycle(ctx: RuntimeContext): void {
   setTimeout(sweepPendingSubtaskDelegations, 4_000);
   setInterval(sweepPendingSubtaskDelegations, SUBTASK_DELEGATION_SWEEP_MS);
   setTimeout(autoAssignAgentProviders, 4_000);
+  setTimeout(sweepStaleOrchestrationMaps, 60_000);
+  setInterval(sweepStaleOrchestrationMaps, ORCHESTRATION_MAP_SWEEP_MS);
   const telegramReceiver = startTelegramReceiver({ db });
   const discordReceiver = startDiscordReceiver({ db });
 

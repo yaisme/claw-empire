@@ -177,6 +177,25 @@ export function registerAgentCrudRoutes(ctx: RuntimeContext): void {
   app.get("/api/agents", (req, res) => {
     const includeSeed = parseIncludeSeedParam(req.query?.include_seed);
     const seedFilterClause = includeSeed ? "" : "WHERE a.id NOT LIKE '%-seed-%'";
+
+    const rawLimit = ctx.firstQueryValue(req.query.limit);
+    const rawPage = ctx.firstQueryValue(req.query.page);
+    const parsedLimit = rawLimit ? Number(rawLimit) : null;
+    const parsedPage = rawPage ? Number(rawPage) : 1;
+    const usePagination = parsedLimit !== null && Number.isInteger(parsedLimit) && parsedLimit > 0;
+    const limit = usePagination ? Math.min(parsedLimit, 200) : null;
+    const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+    const offset = limit !== null ? (page - 1) * limit : 0;
+    const limitOffsetClause = limit !== null ? `LIMIT ${limit} OFFSET ${offset}` : "";
+
+    let total = 0;
+    if (limit !== null) {
+      const countRow = db
+        .prepare(`SELECT COUNT(*) AS cnt FROM agents a ${seedFilterClause}`)
+        .get() as { cnt: number };
+      total = countRow.cnt;
+    }
+
     let agents: unknown[];
     try {
       agents = db
@@ -194,6 +213,7 @@ export function registerAgentCrudRoutes(ctx: RuntimeContext): void {
       LEFT JOIN departments d ON a.department_id = d.id
       ${seedFilterClause}
       ORDER BY a.department_id, a.role, a.name
+      ${limitOffsetClause}
     `,
         )
         .all();
@@ -206,11 +226,17 @@ export function registerAgentCrudRoutes(ctx: RuntimeContext): void {
       LEFT JOIN departments d ON a.department_id = d.id
       ${seedFilterClause}
       ORDER BY a.department_id, a.role, a.name
+      ${limitOffsetClause}
     `,
         )
         .all();
     }
-    res.json({ agents });
+
+    if (limit !== null) {
+      res.json({ agents, pagination: { page, limit, total } });
+    } else {
+      res.json({ agents });
+    }
   });
 
   app.get("/api/meeting-presence", (_req, res) => {
