@@ -8,6 +8,7 @@ import type { MeetingMinuteEntryRow, MeetingMinutesRow } from "../../shared/type
 import { isWorkflowPackKey } from "../../../workflow/packs/definitions.ts";
 import { resolveWorkflowPackKeyForTask } from "../../../workflow/packs/task-pack-resolver.ts";
 import type { VectorService } from "../../../vector/vector-service.ts";
+import { deleteAttachmentsForOwner } from "../attachments.ts";
 
 export type TaskCrudRouteDeps = Pick<
   RuntimeContext,
@@ -602,6 +603,10 @@ export function registerTaskCrudRoutes(deps: TaskCrudRouteDeps): void {
         id,
       );
     }
+
+    // Clean up attachments
+    const attachmentsDir = process.env.ATTACHMENTS_DIR || path.join(process.cwd(), "attachments");
+    deleteAttachmentsForOwner(db as any, attachmentsDir, "task", id);
 
     db.prepare("DELETE FROM task_logs WHERE task_id = ?").run(id);
     db.prepare("DELETE FROM messages WHERE task_id = ?").run(id);

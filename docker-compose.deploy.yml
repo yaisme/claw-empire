@@ -1,0 +1,107 @@
+# =============================================================================
+# Claw-Empire — Full-featured deploy with bind-mount volumes
+# =============================================================================
+#
+# Usage:
+#   docker compose -f docker-compose.deploy.yml up -d --build
+#
+# After first start, pull the embedding model:
+#   docker compose -f docker-compose.deploy.yml exec ollama ollama pull nomic-embed-text
+#
+# Persistent data stored at: ../claw-empire-volume/
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Claw-Empire App
+  # ---------------------------------------------------------------------------
+  claw-empire:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claw-empire
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8790}:8790"
+    volumes:
+      - /home/yaisme/claw-empire/claw-empire-volume/db:/data/db
+      - /home/yaisme/claw-empire/claw-empire-volume/logs:/data/logs
+      - /home/yaisme/claw-empire/claw-empire-volume/worktrees:/app/.climpire-worktrees
+      - /home/yaisme/claw-empire/claw-empire-volume/attachments:/data/attachments
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8790
+      - DB_PATH=/data/db/claw-empire.sqlite
+      - LOGS_DIR=/data/logs
+      - ATTACHMENTS_DIR=/data/attachments
+      # Vector search — Qdrant + Ollama embeddings
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_ENABLED=true
+      - EMBEDDING_BASE_URL=http://ollama:11434
+      - EMBEDDING_MODEL=nomic-embed-text
+      # Node.js performance tuning (16 cores, 62GB RAM)
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - UV_THREADPOOL_SIZE=16
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8790/api/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+
+  # ---------------------------------------------------------------------------
+  # Qdrant — Vector Database (semantic search)
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: claw-qdrant
+    restart: unless-stopped
+    volumes:
+      - /home/yaisme/claw-empire/claw-empire-volume/qdrant:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '(echo > /dev/tcp/localhost/6333) 2>/dev/null'"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # Ollama — Local Embedding Model (CPU mode)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: claw-ollama
+    restart: unless-stopped
+    volumes:
+      - /home/yaisme/claw-empire/claw-empire-volume/ollama:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_LOADED_MODELS=1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "8"
+        reservations:
+          memory: 1G

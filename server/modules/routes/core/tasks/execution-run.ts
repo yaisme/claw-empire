@@ -11,6 +11,7 @@ import {
   consumeInterruptPrompts,
   loadPendingInterruptPrompts,
 } from "../../../workflow/core/interrupt-injection-tools.ts";
+import { buildAttachmentsPromptBlock } from "../attachments.ts";
 
 export type TaskRunRouteDeps = Pick<
   RuntimeContext,
@@ -469,6 +470,14 @@ Whenever you complete a subtask, report it in this format:
         recentChanges ? `[Recent Changes]\n${recentChanges}` : "",
         `[Task] ${task.title}`,
         task.description ? `\n${task.description}` : "",
+        (() => {
+          const attachmentsDir = process.env.ATTACHMENTS_DIR || path.join(process.cwd(), "attachments");
+          const taskBlock = buildAttachmentsPromptBlock(db as any, attachmentsDir, "task", id);
+          const projectBlock = task.project_id
+            ? buildAttachmentsPromptBlock(db as any, attachmentsDir, "project", task.project_id)
+            : null;
+          return [taskBlock, projectBlock].filter(Boolean).join("\n") || null;
+        })(),
         workflowPackGuidance ? `\n[Workflow Pack Execution Rules]\n${workflowPackGuidance}` : "",
         continuationCtx,
         conversationCtx,

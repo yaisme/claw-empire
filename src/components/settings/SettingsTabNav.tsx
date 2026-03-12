@@ -12,6 +12,7 @@ const TAB_ITEMS: Array<{ key: SettingsTab; icon: string; label: (t: TFunction) =
   { key: "oauth", icon: "🔑", label: (t) => t({ ko: "OAuth 인증", en: "OAuth", ja: "OAuth 認証", zh: "OAuth 认证" }) },
   { key: "api", icon: "🔌", label: (t) => t({ ko: "API 연동", en: "API", ja: "API 連携", zh: "API 集成" }) },
   { key: "gateway", icon: "📡", label: (t) => t({ ko: "채널 메시지", en: "Channel", ja: "チャネル", zh: "频道" }) },
+  { key: "packs", icon: "📦", label: (t) => t({ ko: "워크팩", en: "Packs", ja: "パック", zh: "工作包" }) },
 ];
 
 export default function SettingsTabNav({ tab, setTab, t }: SettingsTabNavProps) {

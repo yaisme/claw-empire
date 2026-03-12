@@ -133,6 +133,27 @@ export function applyTaskSchemaMigrations(db: DbLike): void {
   migrateLegacyTasksStatusSchema(db);
   repairLegacyTaskForeignKeys(db);
   ensureMessagesIdempotencySchema(db);
+  ensureAttachmentsSchema(db);
+}
+
+function ensureAttachmentsSchema(db: DbLike): void {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS attachments (
+        id TEXT PRIMARY KEY,
+        owner_type TEXT NOT NULL CHECK(owner_type IN ('task', 'project')),
+        owner_id TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER DEFAULT (unixepoch()*1000)
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_attachments_owner ON attachments(owner_type, owner_id, created_at DESC)");
+  } catch {
+    /* already exists */
+  }
 }
 
 function safeJsonParse(raw: string): unknown {

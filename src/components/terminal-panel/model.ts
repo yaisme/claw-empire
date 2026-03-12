@@ -1,12 +1,14 @@
 import type { Agent, Task } from "../../types";
 import type { LangText } from "../../i18n";
 
+export type TerminalTabKey = "terminal" | "minutes" | "files";
+
 export interface TerminalPanelProps {
   taskId: string;
   task: Task | undefined;
   agent: Agent | undefined;
   agents: Agent[];
-  initialTab?: "terminal" | "minutes";
+  initialTab?: TerminalTabKey;
   onClose: () => void;
 }
 

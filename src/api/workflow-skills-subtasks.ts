@@ -301,6 +301,41 @@ export async function updateWorkflowPack(
   });
 }
 
+export async function createWorkflowPack(input: {
+  key: string;
+  name: string;
+  routing_keywords?: string[];
+  enabled?: boolean;
+}): Promise<{ ok: boolean; pack: WorkflowPackConfig }> {
+  return post("/api/workflow-packs", input) as Promise<{ ok: boolean; pack: WorkflowPackConfig }>;
+}
+
+export interface WorkflowPackImpact {
+  activeTaskCount: number;
+  totalTaskCount: number;
+  agentCount: number;
+  projectCount: number;
+  isActivePack: boolean;
+}
+
+export async function getWorkflowPackImpact(key: string): Promise<WorkflowPackImpact> {
+  return request<WorkflowPackImpact>(`/api/workflow-packs/${encodeURIComponent(key)}/impact`);
+}
+
+export async function deleteWorkflowPack(
+  key: string,
+  options?: { force?: boolean; agentAction?: "reassign" | "delete" },
+): Promise<{ ok: boolean; deleted: string }> {
+  const params = new URLSearchParams();
+  if (options?.force) params.set("force", "1");
+  if (options?.agentAction) params.set("agentAction", options.agentAction);
+  const qs = params.toString();
+  return del(`/api/workflow-packs/${encodeURIComponent(key)}${qs ? `?${qs}` : ""}`) as Promise<{
+    ok: boolean;
+    deleted: string;
+  }>;
+}
+
 export async function previewWorkflowRoute(input: {
   text: string;
   workflow_pack_key?: WorkflowPackKey;
@@ -433,4 +468,47 @@ export async function updateSubtask(
   data: Partial<Pick<SubTask, "title" | "description" | "status" | "assigned_agent_id" | "blocked_reason">>,
 ): Promise<SubTask> {
   return patch(`/api/subtasks/${id}`, data) as Promise<SubTask>;
+}
+
+// Attachments
+export interface Attachment {
+  id: string;
+  owner_type: "task" | "project";
+  owner_id: string;
+  filename: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: number;
+}
+
+export async function uploadAttachments(
+  ownerType: "task" | "project",
+  ownerId: string,
+  files: File[],
+): Promise<Attachment[]> {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("file", file);
+  }
+  const result = await request<{ ok: boolean; attachments: Attachment[] }>(
+    `/api/attachments/${ownerType}/${ownerId}`,
+    { method: "POST", body: formData },
+  );
+  return result.attachments ?? [];
+}
+
+export async function listAttachments(ownerType: "task" | "project", ownerId: string): Promise<Attachment[]> {
+  const result = await request<{ ok: boolean; attachments: Attachment[] }>(
+    `/api/attachments/${ownerType}/${ownerId}`,
+  );
+  return result.attachments ?? [];
+}
+
+export function getAttachmentDownloadUrl(id: string): string {
+  return `/api/attachments/download/${id}`;
+}
+
+export async function deleteAttachment(id: string): Promise<{ ok: boolean }> {
+  return del(`/api/attachments/${id}`) as Promise<{ ok: boolean }>;
 }

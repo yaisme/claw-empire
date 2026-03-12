@@ -35,6 +35,7 @@ import { registerProjectRoutes } from "./core/projects.ts";
 import { registerTaskCrudRoutes } from "./core/tasks/crud.ts";
 import { registerTaskExecutionRoutes } from "./core/tasks/execution.ts";
 import { registerTaskSubtaskRoutes } from "./core/tasks/subtasks.ts";
+import { registerAttachmentRoutes } from "./core/attachments.ts";
 import { registerUpdateAutoRoutes } from "./core/update-auto/register.ts";
 import type { AgentRow, MeetingMinuteEntryRow, MeetingMinutesRow, MeetingReviewDecision } from "./shared/types.ts";
 import { getDiscordReceiverStatus } from "../../messenger/discord-receiver.ts";
@@ -456,6 +457,12 @@ export function registerRoutesPartA(ctx: RuntimeContext): Record<string, never> 
     db,
     broadcast,
   });
+
+  // ---------------------------------------------------------------------------
+  // Attachments (file uploads for tasks & projects)
+  // ---------------------------------------------------------------------------
+  const attachmentsDir = process.env.ATTACHMENTS_DIR || path.join(process.cwd(), "attachments");
+  registerAttachmentRoutes({ app, db: db as any, attachmentsDir });
 
   return {};
 }

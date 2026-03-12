@@ -6,6 +6,7 @@ import path from "node:path";
 import { getAssignedAgentIdsByProjectIds } from "../shared/project-assignments.ts";
 import { createProjectRouteHelpers } from "./projects/helpers.ts";
 import { DEFAULT_WORKFLOW_PACK_KEY, isWorkflowPackKey } from "../../workflow/packs/definitions.ts";
+import { deleteAttachmentsForOwner } from "./attachments.ts";
 
 type FirstQueryValue = (value: unknown) => string | undefined;
 type NormalizeTextField = (value: unknown) => string | null;
@@ -414,6 +415,10 @@ export function registerProjectRoutes({
     const id = String(req.params.id);
     const existing = db.prepare("SELECT id FROM projects WHERE id = ?").get(id);
     if (!existing) return res.status(404).json({ error: "not_found" });
+
+    // Clean up attachments
+    const attachmentsDir = process.env.ATTACHMENTS_DIR || path.join(process.cwd(), "attachments");
+    deleteAttachmentsForOwner(db as any, attachmentsDir, "project", id);
 
     db.prepare("UPDATE tasks SET project_id = NULL WHERE project_id = ?").run(id);
     db.prepare("DELETE FROM projects WHERE id = ?").run(id);

@@ -39,6 +39,9 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
 
+# Install AI CLI tools (used by agent spawner)
+RUN npm i -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli opencode-ai
+
 WORKDIR /app
 
 # Copy production node_modules from build stage
@@ -58,9 +61,10 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/templates ./templates
 
-# Create data directories
-RUN mkdir -p /data/db /data/logs /data/worktrees && \
-    chown -R node:node /data /app
+# Create data directories + CLI config dirs for node user
+RUN mkdir -p /data/db /data/logs /data/worktrees \
+             /home/node/.gemini /home/node/.codex /home/node/.claude && \
+    chown -R node:node /data /app /home/node
 
 # Run as non-root
 USER node

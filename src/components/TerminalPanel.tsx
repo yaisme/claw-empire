@@ -11,7 +11,9 @@ import {
   TERMINAL_TAIL_LINES,
   type TaskLogEntry,
   type TerminalPanelProps,
+  type TerminalTabKey,
 } from "./terminal-panel/model";
+import AttachmentsTab from "./terminal-panel/AttachmentsTab";
 
 export default function TerminalPanel({
   taskId,
@@ -27,7 +29,7 @@ export default function TerminalPanel({
   const [meetingMinutes, setMeetingMinutes] = useState<MeetingMinute[]>([]);
   const [logPath, setLogPath] = useState("");
   const [follow, setFollow] = useState(true);
-  const [activeTab, setActiveTab] = useState<"terminal" | "minutes">(initialTab);
+  const [activeTab, setActiveTab] = useState<TerminalTabKey>(initialTab);
   const [interventionOpen, setInterventionOpen] = useState(false);
   const [interventionPrompt, setInterventionPrompt] = useState("");
   const [interventionBusy, setInterventionBusy] = useState(false);
@@ -109,6 +111,7 @@ export default function TerminalPanel({
   }, [taskId]);
 
   useEffect(() => {
+    if (activeTab === "files") return; // files tab manages its own data
     const fn = activeTab === "terminal" ? fetchTerminal : fetchMeetingMinutes;
     const ms = activeTab === "terminal" ? 1500 : 2500;
     fn();
@@ -464,6 +467,19 @@ export default function TerminalPanel({
               >
                 {tr("회의록", "Minutes", "会議録", "会议纪要")}
               </button>
+              <button
+                onClick={() => setActiveTab("files")}
+                className={`px-2 py-0.5 text-[10px] transition ${
+                  activeTab === "files" ? "bg-cyan-700/30 text-cyan-200" : ""
+                }`}
+                style={
+                  activeTab !== "files"
+                    ? { background: "var(--th-bg-surface)", color: "var(--th-text-secondary)" }
+                    : undefined
+                }
+              >
+                {tr("파일", "Files", "ファイル", "文件")}
+              </button>
             </div>
           </div>
         </div>
@@ -664,8 +680,10 @@ export default function TerminalPanel({
         </div>
       )}
 
-      {/* Terminal body */}
-      {activeTab === "terminal" ? (
+      {/* Tab body */}
+      {activeTab === "files" ? (
+        <AttachmentsTab ownerType="task" ownerId={taskId} t={t} />
+      ) : activeTab === "terminal" ? (
         <div ref={containerRef} className="flex-1 overflow-y-auto p-4" onScroll={handleScroll}>
           {!text ? (
             <div className="flex flex-col items-center justify-center h-full" style={{ color: "var(--th-text-muted)" }}>

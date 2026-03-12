@@ -9,6 +9,7 @@ import CliSettingsTab from "./settings/CliSettingsTab";
 import GatewaySettingsTab from "./settings/GatewaySettingsTab";
 import GeneralSettingsTab from "./settings/GeneralSettingsTab";
 import OAuthSettingsTab from "./settings/OAuthSettingsTab";
+import PacksSettingsTab from "./settings/PacksSettingsTab";
 import SettingsTabNav from "./settings/SettingsTabNav";
 import type { AccountDraftMap, AccountDraftPatch, LocalSettings, SettingsTab } from "./settings/types";
 import { useApiProvidersState } from "./settings/useApiProvidersState";
@@ -455,6 +456,8 @@ export default function SettingsPanel({
       {tab === "gateway" && (
         <GatewaySettingsTab t={t} form={form} setForm={setForm} persistSettings={persistSettings} />
       )}
+
+      {tab === "packs" && <PacksSettingsTab t={t} />}
     </div>
   );
 }

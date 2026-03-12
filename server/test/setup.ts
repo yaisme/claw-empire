@@ -26,3 +26,8 @@ try {
 
 process.env.DB_PATH = dbPath;
 process.env.LOGS_DIR = logsDir;
+
+// Ensure tests use default CORS suffixes (not deployment-specific .env values)
+if (!process.env.ALLOWED_ORIGIN_SUFFIXES) {
+  process.env.ALLOWED_ORIGIN_SUFFIXES = ".ts.net";
+}

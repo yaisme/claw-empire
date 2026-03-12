@@ -101,6 +101,11 @@ function classifyWorkflowPack(text: string): WorkflowRouteResult {
   };
 }
 
+function packExistsInDb(db: RuntimeContext["db"], key: string): boolean {
+  const row = db.prepare("SELECT key FROM workflow_packs WHERE key = ?").get(key);
+  return !!row;
+}
+
 export function registerWorkflowPackRoutes(
   ctx: Pick<RuntimeContext, "app" | "db" | "nowMs" | "normalizeTextField">,
 ): void {
@@ -160,7 +165,7 @@ export function registerWorkflowPackRoutes(
 
   app.put("/api/workflow-packs/:key", (req, res) => {
     const packKey = String(req.params.key || "").trim();
-    if (!isWorkflowPackKey(packKey)) return res.status(400).json({ error: "invalid_pack_key" });
+    if (!isWorkflowPackKey(packKey) && !packExistsInDb(db, packKey)) return res.status(400).json({ error: "invalid_pack_key" });
 
     const existing = db.prepare("SELECT key FROM workflow_packs WHERE key = ?").get(packKey) as
       | { key: string }
@@ -227,6 +232,214 @@ export function registerWorkflowPackRoutes(
         updated_at: row.updated_at,
       },
     });
+  });
+
+  // ── POST /api/workflow-packs — Create a new custom workflow pack ──
+  app.post("/api/workflow-packs", (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const key = normalizeTextField(body.key) ?? "";
+    const name = normalizeTextField(body.name) ?? "";
+
+    if (!/^[a-z][a-z0-9_]{1,49}$/.test(key)) {
+      return res.status(400).json({ error: "invalid_key_format" });
+    }
+    if (isWorkflowPackKey(key)) {
+      return res.status(400).json({ error: "key_is_builtin" });
+    }
+    if (packExistsInDb(db, key)) {
+      return res.status(409).json({ error: "key_already_exists" });
+    }
+    if (!name) {
+      return res.status(400).json({ error: "name_required" });
+    }
+
+    // Clone defaults from the "development" seed
+    const devSeed = DEFAULT_WORKFLOW_PACK_SEEDS.find((s) => s.key === "development")!;
+    const enabled = body.enabled === false || body.enabled === 0 || String(body.enabled) === "0" ? 0 : 1;
+
+    const routingKeywordsInput = body.routing_keywords ?? body.routingKeywords ?? body.routing_keywords_json;
+    let routingKeywordsJson: string;
+    if (routingKeywordsInput !== undefined) {
+      const normalized = normalizeJsonStorageInput(routingKeywordsInput);
+      if (!normalized.ok) return res.status(400).json({ error: "invalid_json_field", field: "routing_keywords", reason: normalized.error });
+      routingKeywordsJson = normalized.json;
+    } else {
+      routingKeywordsJson = JSON.stringify(devSeed.routingKeywords);
+    }
+
+    const now = nowMs();
+    db.prepare(
+      `INSERT INTO workflow_packs (key, name, enabled, input_schema_json, prompt_preset_json, qa_rules_json, output_template_json, routing_keywords_json, cost_profile_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      key,
+      name,
+      enabled,
+      JSON.stringify(devSeed.inputSchema),
+      JSON.stringify(devSeed.promptPreset),
+      JSON.stringify(devSeed.qaRules),
+      JSON.stringify(devSeed.outputTemplate),
+      routingKeywordsJson,
+      JSON.stringify(devSeed.costProfile),
+      now,
+      now,
+    );
+
+    const row = db.prepare("SELECT * FROM workflow_packs WHERE key = ?").get(key) as WorkflowPackRow | undefined;
+    if (!row) return res.status(500).json({ error: "pack_insert_failed" });
+
+    return res.status(201).json({
+      ok: true,
+      pack: {
+        key: row.key,
+        name: row.name,
+        enabled: row.enabled !== 0,
+        input_schema: parseStoredJson(row.input_schema_json),
+        prompt_preset: parseStoredJson(row.prompt_preset_json),
+        qa_rules: parseStoredJson(row.qa_rules_json),
+        output_template: parseStoredJson(row.output_template_json),
+        routing_keywords: parseStoredJson(row.routing_keywords_json),
+        cost_profile: parseStoredJson(row.cost_profile_json),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      },
+    });
+  });
+
+  // ── GET /api/workflow-packs/:key/impact — Pre-delete impact check ──
+  app.get("/api/workflow-packs/:key/impact", (req, res) => {
+    const packKey = String(req.params.key || "").trim();
+    if (!packKey) return res.status(400).json({ error: "invalid_pack_key" });
+
+    if (!isWorkflowPackKey(packKey) && !packExistsInDb(db, packKey)) {
+      return res.status(404).json({ error: "pack_not_found" });
+    }
+
+    const activeTaskRow = db
+      .prepare("SELECT COUNT(*) AS cnt FROM tasks WHERE workflow_pack_key = ? AND status IN ('in_progress', 'review')")
+      .get(packKey) as { cnt: number };
+    const totalTaskRow = db
+      .prepare("SELECT COUNT(*) AS cnt FROM tasks WHERE workflow_pack_key = ?")
+      .get(packKey) as { cnt: number };
+    const agentRow = db
+      .prepare("SELECT COUNT(*) AS cnt FROM agents WHERE workflow_pack_key = ?")
+      .get(packKey) as { cnt: number };
+    const projectRow = db
+      .prepare("SELECT COUNT(*) AS cnt FROM projects WHERE default_pack_key = ?")
+      .get(packKey) as { cnt: number };
+
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("officeWorkflowPack") as
+      | { value: string }
+      | undefined;
+    const isActivePack = settingRow?.value === packKey;
+
+    return res.json({
+      activeTaskCount: activeTaskRow.cnt,
+      totalTaskCount: totalTaskRow.cnt,
+      agentCount: agentRow.cnt,
+      projectCount: projectRow.cnt,
+      isActivePack,
+    });
+  });
+
+  // ── DELETE /api/workflow-packs/:key — Delete with cascade ──
+  app.delete("/api/workflow-packs/:key", (req, res) => {
+    const packKey = String(req.params.key || "").trim();
+
+    if (packKey === "development") {
+      return res.status(400).json({ error: "cannot_delete_default" });
+    }
+    if (!packExistsInDb(db, packKey)) {
+      return res.status(404).json({ error: "pack_not_found" });
+    }
+
+    const force = String(req.query.force || "") === "true";
+    const agentAction = String(req.query.agentAction || "reassign");
+
+    // Check for active tasks
+    const activeTaskRow = db
+      .prepare("SELECT COUNT(*) AS cnt FROM tasks WHERE workflow_pack_key = ? AND status IN ('in_progress', 'review')")
+      .get(packKey) as { cnt: number };
+
+    if (activeTaskRow.cnt > 0 && !force) {
+      return res.status(409).json({ error: "active_tasks_exist", activeTaskCount: activeTaskRow.cnt });
+    }
+
+    const now = nowMs();
+
+    // 1. If this is the active office pack, revert to "development"
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("officeWorkflowPack") as
+      | { value: string }
+      | undefined;
+    if (settingRow?.value === packKey) {
+      db.prepare("UPDATE settings SET value = ? WHERE key = ?").run("development", "officeWorkflowPack");
+    }
+
+    // 2. If force, cancel active tasks
+    if (force) {
+      db.prepare(
+        "UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE workflow_pack_key = ? AND status IN ('in_progress', 'review')",
+      ).run(now, packKey);
+    }
+
+    // 3. Nullify workflow_pack_key on remaining tasks
+    db.prepare("UPDATE tasks SET workflow_pack_key = NULL WHERE workflow_pack_key = ?").run(packKey);
+
+    // 4. Handle agents
+    if (agentAction === "delete") {
+      // Nullify FKs referencing these agents before deletion
+      db.prepare(
+        "UPDATE tasks SET assigned_agent_id = NULL WHERE assigned_agent_id IN (SELECT id FROM agents WHERE workflow_pack_key = ?)",
+      ).run(packKey);
+      db.prepare(
+        "UPDATE subtasks SET assigned_agent_id = NULL WHERE assigned_agent_id IN (SELECT id FROM agents WHERE workflow_pack_key = ?)",
+      ).run(packKey);
+      db.prepare(
+        "UPDATE meeting_minute_entries SET speaker_agent_id = NULL WHERE speaker_agent_id IN (SELECT id FROM agents WHERE workflow_pack_key = ?)",
+      ).run(packKey);
+      db.prepare(
+        "UPDATE task_report_archives SET generated_by_agent_id = NULL WHERE generated_by_agent_id IN (SELECT id FROM agents WHERE workflow_pack_key = ?)",
+      ).run(packKey);
+      db.prepare(
+        "UPDATE review_round_decision_states SET planner_agent_id = NULL WHERE planner_agent_id IN (SELECT id FROM agents WHERE workflow_pack_key = ?)",
+      ).run(packKey);
+      db.prepare("DELETE FROM agents WHERE workflow_pack_key = ?").run(packKey);
+    } else {
+      // reassign (default): detach agents
+      db.prepare(
+        "UPDATE agents SET workflow_pack_key = NULL, department_id = NULL WHERE workflow_pack_key = ?",
+      ).run(packKey);
+    }
+
+    // 5. Delete department associations
+    db.prepare("DELETE FROM office_pack_departments WHERE workflow_pack_key = ?").run(packKey);
+
+    // 6. Update projects
+    db.prepare("UPDATE projects SET default_pack_key = NULL WHERE default_pack_key = ?").run(packKey);
+
+    // 7. Remove from officePackProfiles setting
+    const profilesRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("officePackProfiles") as
+      | { value: string }
+      | undefined;
+    if (profilesRow?.value) {
+      try {
+        const profiles = JSON.parse(profilesRow.value) as Record<string, unknown>;
+        if (packKey in profiles) {
+          delete profiles[packKey];
+          db.prepare("UPDATE settings SET value = ? WHERE key = ?").run(
+            JSON.stringify(profiles),
+            "officePackProfiles",
+          );
+        }
+      } catch {
+        // ignore malformed JSON in settings
+      }
+    }
+
+    // 8. Delete the pack itself
+    db.prepare("DELETE FROM workflow_packs WHERE key = ?").run(packKey);
+
+    return res.json({ ok: true, deleted: packKey });
   });
 
   app.post("/api/workflow/route", (req, res) => {
