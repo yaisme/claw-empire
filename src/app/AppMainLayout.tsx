@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Sidebar from "../components/Sidebar";
 import OfficeView from "../components/OfficeView";
 import Dashboard from "../components/Dashboard";
@@ -34,6 +34,7 @@ import {
 } from "./office-workflow-pack";
 import { resolvePackAgentViews, resolvePackDepartmentsForDisplay } from "./office-pack-display";
 import { applyOfficePackToTaskInput, filterTasksByOfficePack, type TaskCreateInput } from "./task-workflow-pack";
+import { getWorkflowPacks } from "../api/workflow-skills-subtasks";
 
 interface AppMainLayoutLabels {
   uiLanguage: string;
@@ -197,7 +198,20 @@ export default function AppMainLayout({
   const uiLanguage =
     labels.uiLanguage === "ko" || labels.uiLanguage === "ja" || labels.uiLanguage === "zh" ? labels.uiLanguage : "en";
   const officePackKey = normalizeOfficeWorkflowPack(activeOfficeWorkflowPack);
-  const officePackOptions = useMemo(() => listOfficePackOptions(uiLanguage), [uiLanguage]);
+  const allOfficePackOptions = useMemo(() => listOfficePackOptions(uiLanguage), [uiLanguage]);
+
+  // Fetch DB pack keys so the dropdown only shows packs that exist in the database
+  const [dbPackKeys, setDbPackKeys] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    getWorkflowPacks()
+      .then((res) => setDbPackKeys(new Set(res.packs.map((p) => p.key))))
+      .catch(() => {});
+  }, [activeOfficeWorkflowPack]);
+
+  const officePackOptions = useMemo(
+    () => (dbPackKeys ? allOfficePackOptions.filter((o) => dbPackKeys.has(o.key)) : allOfficePackOptions),
+    [allOfficePackOptions, dbPackKeys],
+  );
   const officePackLabel =
     labels.uiLanguage === "ko"
       ? "오피스 팩"
