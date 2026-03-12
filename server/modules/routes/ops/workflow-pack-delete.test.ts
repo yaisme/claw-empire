@@ -432,24 +432,8 @@ describe("DELETE /api/workflow-packs/:key — cascade behavior", () => {
   });
 });
 
-describe("Office pack dropdown vs DB pack list — known gap", () => {
-  it("listOfficePackOptions returns hardcoded PACK_PRESETS, not DB contents", async () => {
-    // This is a frontend-only function — import and verify it returns a static list
-    const { listOfficePackOptions } = await import("../../../../src/app/office-workflow-pack.ts");
-
-    const options = listOfficePackOptions("en");
-
-    // Should always return the same 6 built-in packs regardless of DB state
-    const keys = options.map((o: any) => o.key);
-    expect(keys).toContain("development");
-    expect(keys).toContain("novel");
-    expect(keys).toContain("report");
-    expect(keys).toContain("video_preprod");
-    expect(keys).toContain("web_research_report");
-    expect(keys).toContain("roleplay");
-
-    // This demonstrates the bug: the dropdown never reflects DB deletions
-    // because it reads from a hardcoded constant, not from the server
-    expect(keys.length).toBe(6);
-  });
-});
+// NOTE: Office pack dropdown reads from hardcoded PACK_PRESETS in
+// src/app/office-workflow-pack.ts (frontend-only), not from the DB.
+// This means deleting a built-in pack from the DB has no effect on
+// the dropdown — it always shows all 6 presets. This is a known gap
+// but cannot be tested here (server tests cannot import src/ DOM code).
