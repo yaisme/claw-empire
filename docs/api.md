@@ -2,7 +2,7 @@
 
 This document defines a contributor-facing API baseline for Claw-Empire.
 It is intentionally compact and focused on frequently used endpoints.
-Current baseline target: `v1.2.4` (local snapshot, 2026-03-07).
+Current baseline target: `v2.0.4` (local snapshot, 2026-03-12).
 
 ## Base
 
@@ -111,6 +111,9 @@ or
 | ------ | -------------------------- | -------------------------------------------------------------- |
 | GET    | `/api/workflow-packs`      | List workflow packs and effective enable state                 |
 | PUT    | `/api/workflow-packs/:key` | Update workflow pack metadata/flags/json fields                |
+| POST   | `/api/workflow-packs`      | Create custom workflow pack                                    |
+| GET    | `/api/workflow-packs/:key/impact` | Preview impact of deleting a pack (active tasks, agents, projects) |
+| DELETE | `/api/workflow-packs/:key` | Delete workflow pack (supports `?force=1&agentAction=reassign\|delete`) |
 | POST   | `/api/workflow/route`      | Resolve workflow pack by explicit/session/project/text context |
 
 ### Runtime / Org
@@ -220,6 +223,28 @@ or
 | GET    | `/api/oauth/models`             | OAuth-backed model catalog (Copilot/OpenCode/Antigravity) |
 | GET    | `/api/cli-models`               | Local CLI model catalog (Claude/Codex/Gemini/OpenCode)    |
 
+### Attachments
+
+| Method | Path                                    | Purpose                                      |
+| ------ | --------------------------------------- | -------------------------------------------- |
+| POST   | `/api/attachments/:ownerType/:ownerId`  | Upload files (multipart/form-data, max 50MB) |
+| GET    | `/api/attachments/:ownerType/:ownerId`  | List attachments for a task or project       |
+| GET    | `/api/attachments/download/:id`         | Download an attachment file                  |
+| DELETE | `/api/attachments/:id`                  | Delete an attachment                         |
+
+- `ownerType` must be `task` or `project`
+- Upload limit: 50MB per file, 5 files per request
+- Text files (< 100KB) are auto-inlined into agent execution prompts; binary files are listed with paths
+
+### Backup / Vector Search
+
+| Method | Path                    | Purpose                                                  |
+| ------ | ----------------------- | -------------------------------------------------------- |
+| POST   | `/api/backup`           | Create timestamped SQLite backup (keeps 5 most recent)   |
+| GET    | `/api/vector/status`    | Qdrant + embedding service health and collection stats   |
+| GET    | `/api/vector/search`    | Semantic search across tasks and meetings                |
+| POST   | `/api/vector/reindex`   | Trigger full re-indexing of tasks and meetings into Qdrant |
+
 ### Project / GitHub / Update
 
 | Method | Path                                      | Purpose                                                          |
@@ -253,6 +278,7 @@ or
   - `/api/tasks/bulk-hide`, `/api/tasks/:id/diff`, `/api/worktrees`
   - `/api/meeting-presence`, `/api/agents/active`, `/api/agents/cli-processes`
   - `/api/cli-usage`, `/api/api-providers/presets`, `/api/task-reports*`
+  - `/api/attachments/*`, `/api/backup`, `/api/vector/*`
 
 ## Known Follow-up
 

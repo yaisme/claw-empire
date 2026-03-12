@@ -221,6 +221,11 @@ Usage path: **Chat window > Report Request button**, then enter your request.
 | **Manual Agent Assignment**    | Assign specific agents to projects; meetings/delegation respect manual selection, with pre-save safeguards for no-agent or leader-only selections            |
 | **Sprite Registration Safety** | Prevents duplicate sprite-number file overwrite by rejecting conflicting uploads with explicit `409 sprite_number_exists` responses                          |
 | **Custom Skill Upload**        | Upload `.md` skill files through the UI to train CLI representatives with custom skills, complete with classroom training animation and management interface |
+| **File Attachments**           | Upload images, documents, and source code to tasks and projects — text files are inlined in agent prompts, binary files referenced by path                  |
+| **Login Gate**                 | Browser-based token authentication for public/remote deployments — replaces unreliable `window.prompt()` flow                                                |
+| **Pack Management**            | Create, edit, and delete custom workflow packs from Settings with full cascade handling for active tasks, agents, and departments                             |
+| **SQLite Auto-Backup**         | Automatic timestamped backup on startup and on-demand via `POST /api/backup` (keeps 5 most recent)                                                          |
+| **Vector Search**              | Optional Qdrant + Ollama integration for semantic search across tasks, meetings, and documents                                                               |
 
 ---
 
@@ -232,6 +237,7 @@ Usage path: **Chat window > Report Request button**, then enter your request.
 | **Pixel Art Engine** | PixiJS 8                                            |
 | **Backend**          | Express 5 + SQLite (zero-config embedded DB)        |
 | **Real-time**        | WebSocket (ws)                                      |
+| **Vector Search**    | Qdrant + Ollama (optional, for semantic search)     |
 | **Validation**       | Zod 4                                               |
 | **Icons**            | Lucide React                                        |
 | **Routing**          | React Router 7                                      |
@@ -567,6 +573,57 @@ curl -X POST http://127.0.0.1:8790/api/inbox \
 
 ---
 
+## Docker Deployment
+
+Three Docker Compose variants are provided:
+
+| File | Description |
+| --- | --- |
+| `docker-compose.deploy.yml` | **Full-featured** — app + Qdrant + Ollama with bind-mount volumes |
+| `docker-compose.minimal.yml` | App only, named volumes, no vector search |
+| `docker-compose.yml` | Full stack with named volumes (development reference) |
+
+### Quick deploy (recommended)
+
+```bash
+cp .env.example .env
+# Edit .env — set OAUTH_ENCRYPTION_SECRET and API_AUTH_TOKEN
+
+docker compose -f docker-compose.deploy.yml up -d --build
+
+# Pull the embedding model (first time only)
+docker compose -f docker-compose.deploy.yml exec ollama ollama pull nomic-embed-text
+
+# Restart app to connect to Ollama
+docker compose -f docker-compose.deploy.yml restart claw-empire
+```
+
+### Persistent volumes
+
+Data is stored in bind-mount directories (configurable in the compose file):
+
+| Mount | Container path | Purpose |
+| --- | --- | --- |
+| `db/` | `/data/db` | SQLite database + auto-backups |
+| `logs/` | `/data/logs` | Task/agent execution logs |
+| `worktrees/` | `/app/.climpire-worktrees` | Agent git worktrees |
+| `attachments/` | `/data/attachments` | Uploaded file attachments |
+| `qdrant/` | `/qdrant/storage` | Qdrant vector database |
+| `ollama/` | `/root/.ollama` | Ollama model cache |
+
+### Useful commands
+
+```bash
+docker compose -f docker-compose.deploy.yml logs -f claw-empire   # App logs
+docker compose -f docker-compose.deploy.yml restart                # Restart all
+docker compose -f docker-compose.deploy.yml down                   # Stop all
+docker compose -f docker-compose.deploy.yml up -d --build          # Rebuild & deploy
+```
+
+For non-Docker deployment (systemd + nginx), see [`deploy/README.md`](deploy/README.md).
+
+---
+
 ## Environment Variables
 
 Copy `.env.example` to `.env`. All secrets stay local — never commit `.env`.
@@ -582,6 +639,11 @@ Copy `.env.example` to `.env`. All secrets stay local — never commit `.env`.
 | `OPENCLAW_CONFIG`                      | Recommended for OpenClaw | Absolute path to `openclaw.json` used for gateway target discovery/chat relay                                                                |
 | `DB_PATH`                              | No                       | SQLite database path (default: `./claw-empire.sqlite`)                                                                                       |
 | `LOGS_DIR`                             | No                       | Log directory (default: `./logs`)                                                                                                            |
+| `ATTACHMENTS_DIR`                      | No                       | File attachments storage directory (default: `./attachments`)                                                                                |
+| `QDRANT_URL`                           | No                       | Qdrant vector database URL (default: `http://localhost:6333`)                                                                                |
+| `QDRANT_ENABLED`                       | No                       | Enable vector search (`true`/`false`, default: `true`)                                                                                       |
+| `EMBEDDING_BASE_URL`                   | No                       | OpenAI-compatible embedding endpoint (default: `http://localhost:11434` for Ollama)                                                          |
+| `EMBEDDING_MODEL`                      | No                       | Embedding model name (default: `nomic-embed-text`)                                                                                           |
 | `OAUTH_GITHUB_CLIENT_ID`               | No                       | GitHub OAuth App client ID                                                                                                                   |
 | `OAUTH_GITHUB_CLIENT_SECRET`           | No                       | GitHub OAuth App client secret                                                                                                               |
 | `OAUTH_GOOGLE_CLIENT_ID`               | No                       | Google OAuth client ID                                                                                                                       |
@@ -799,6 +861,10 @@ Claw-Empire is designed with security in mind:
 - **No secrets in repo** — Comprehensive `.gitignore` blocks `.env`, `*.pem`, `*.key`, `credentials.json`, etc.
 - **Preflight security checks** — Run `pnpm run preflight:public` before any public release to scan for leaked secrets in both working tree and git history
 - **Localhost by default** — Development server binds to `127.0.0.1`, not exposed to network
+- **Security headers** — CSP, X-Frame-Options DENY, HSTS, X-Content-Type-Options nosniff, Referrer-Policy on all responses
+- **Rate limiting** — In-memory rate limiter on all `/api/` routes (200 req/min general, 20 req/min for auth/inbox/OAuth)
+- **Login gate** — Browser-based token authentication for public deployments with CSRF protection
+- **Global error handler** — Express error middleware catches unhandled errors; React Error Boundary catches render crashes
 
 ## API Docs & Security Quick Links
 
