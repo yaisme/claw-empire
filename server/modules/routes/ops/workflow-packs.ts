@@ -353,7 +353,8 @@ export function registerWorkflowPackRoutes(
       return res.status(404).json({ error: "pack_not_found" });
     }
 
-    const force = String(req.query.force || "") === "true";
+    const forceRaw = String(req.query.force || "");
+    const force = forceRaw === "true" || forceRaw === "1";
     const agentAction = String(req.query.agentAction || "reassign");
 
     // Check for active tasks
@@ -382,8 +383,8 @@ export function registerWorkflowPackRoutes(
       ).run(now, packKey);
     }
 
-    // 3. Nullify workflow_pack_key on remaining tasks
-    db.prepare("UPDATE tasks SET workflow_pack_key = NULL WHERE workflow_pack_key = ?").run(packKey);
+    // 3. Reassign tasks to development pack (NOT NULL constraint)
+    db.prepare("UPDATE tasks SET workflow_pack_key = 'development' WHERE workflow_pack_key = ?").run(packKey);
 
     // 4. Handle agents
     if (agentAction === "delete") {
@@ -405,17 +406,17 @@ export function registerWorkflowPackRoutes(
       ).run(packKey);
       db.prepare("DELETE FROM agents WHERE workflow_pack_key = ?").run(packKey);
     } else {
-      // reassign (default): detach agents
+      // reassign (default): detach agents back to development pack
       db.prepare(
-        "UPDATE agents SET workflow_pack_key = NULL, department_id = NULL WHERE workflow_pack_key = ?",
+        "UPDATE agents SET workflow_pack_key = 'development', department_id = NULL WHERE workflow_pack_key = ?",
       ).run(packKey);
     }
 
     // 5. Delete department associations
     db.prepare("DELETE FROM office_pack_departments WHERE workflow_pack_key = ?").run(packKey);
 
-    // 6. Update projects
-    db.prepare("UPDATE projects SET default_pack_key = NULL WHERE default_pack_key = ?").run(packKey);
+    // 6. Reassign projects to development pack (NOT NULL constraint)
+    db.prepare("UPDATE projects SET default_pack_key = 'development' WHERE default_pack_key = ?").run(packKey);
 
     // 7. Remove from officePackProfiles setting
     const profilesRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("officePackProfiles") as
